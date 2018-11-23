@@ -215,6 +215,8 @@ public abstract class SolidityType {
     }
 
     public static class DynamicArrayType extends ArrayType {
+        private final static int MAX_LEN = 100000;
+        
         public DynamicArrayType(String name) {
             super(name);
         }
@@ -264,6 +266,10 @@ public abstract class SolidityType {
             int len = IntType.decodeInt(encoded, origOffset).intValue();
             origOffset += 32;
             int offset = origOffset;
+            if(len > MAX_LEN) {
+                // Storm/Java context prevents to create arrays that exceed vast sizes.
+                throw new IllegalArgumentException("Unexpected dynamic array length: " + len);
+            }
             Object[] ret = new Object[len];
 
             for (int i = 0; i < len; i++) {
