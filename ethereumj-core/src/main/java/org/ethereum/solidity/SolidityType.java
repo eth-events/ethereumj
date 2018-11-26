@@ -32,6 +32,8 @@ import java.util.List;
 import static org.ethereum.util.ByteUtil.toHexString;
 
 public abstract class SolidityType {
+    private final static int MAX_LEN = 100000;
+    
     protected String name;
 
     public SolidityType(String name) {
@@ -215,8 +217,6 @@ public abstract class SolidityType {
     }
 
     public static class DynamicArrayType extends ArrayType {
-        private final static int MAX_LEN = 100000;
-        
         public DynamicArrayType(String name) {
             super(name);
         }
@@ -319,6 +319,10 @@ public abstract class SolidityType {
             int len = IntType.decodeInt(encoded, offset).intValue();
             if (len == 0) return new byte[0];
             offset += 32;
+            if(len > MAX_LEN) {
+                // Storm/Java context prevents to create arrays that exceed vast sizes.
+                throw new IllegalArgumentException("Unexpected bytes length: " + len);
+            }
             return Arrays.copyOfRange(encoded, offset, offset + len);
         }
 
