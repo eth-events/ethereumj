@@ -521,9 +521,17 @@ public class Program {
         // [5] COOK THE INVOKE AND EXECUTE
         byte[] nonce = getStorage().getNonce(senderAddress).toByteArray();
         InternalTransaction internalTx = addInternalTx(nonce, getGasLimit(), senderAddress, null, endowment, programCode, "create");
+        Repository originalRepo = this.invoke.getOrigRepository();
+        // Some TCK tests have storage only addresses (no code, zero nonce etc) - impossible situation in the real network
+        // So, we should clean up it before reuse, but as tx not always goes successful, state should be correctly
+        // reverted in that case too
+        if (!contractAlreadyExists && track.hasContractDetails(newAddress)) {
+            originalRepo = originalRepo.clone();
+            originalRepo.delete(newAddress);
+        }
         ProgramInvoke programInvoke = programInvokeFactory.createProgramInvoke(
                 this, DataWord.of(newAddress), getOwnerAddress(), value, gasLimit,
-                newBalance, null, track, this.invoke.getOrigRepository(), this.invoke.getBlockStore(), false, byTestingSuite());
+                newBalance, null, track, originalRepo, this.invoke.getBlockStore(), false, byTestingSuite());
 
         ProgramResult result = ProgramResult.createEmpty();
 
@@ -532,28 +540,33 @@ public class Program {
         } else if (isNotEmpty(programCode)) {
             VM vm = new VM(config, vmHook);
             Program program = new Program(programCode, programInvoke, internalTx, config, vmHook).withCommonConfig(commonConfig);
+            // reset storage if the contract with the same address already exists
+            // TCK test case only - normally this is near-impossible situation in the real network
+            ContractDetails contractDetails = program.getStorage().getContractDetails(newAddress);
+            contractDetails.deleteStorage();
             vm.play(program);
             result = program.getResult();
         }
 
         // 4. CREATE THE CONTRACT OUT OF RETURN
-        byte[] code = result.getHReturn();
-
-        long storageCost = getLength(code) * getBlockchainConfig().getGasCost().getCREATE_DATA();
-        long afterSpend = programInvoke.getGas().longValue() - storageCost - result.getGasUsed();
-        if (afterSpend < 0) {
-            if (!blockchainConfig.getConstants().createEmptyContractOnOOG()) {
-                result.setException(Program.Exception.notEnoughSpendingGas("No gas to return just created contract",
+        if (!result.isRevert() && result.getException() == null) {
+            byte[] code = result.getHReturn();
+            long storageCost = getLength(code) * getBlockchainConfig().getGasCost().getCREATE_DATA();
+            long afterSpend = programInvoke.getGas().longValue() - result.getGasUsed() - storageCost;
+            if (afterSpend < 0) {
+                if (!blockchainConfig.getConstants().createEmptyContractOnOOG()) {
+                    result.setException(Program.Exception.notEnoughSpendingGas("No gas to return just created contract",
+                            storageCost, this));
+                } else {
+                    track.saveCode(newAddress, EMPTY_BYTE_ARRAY);
+                }
+            } else if (getLength(code) > blockchainConfig.getConstants().getMAX_CONTRACT_SZIE()) {
+                result.setException(Program.Exception.notEnoughSpendingGas("Contract size too large: " + getLength(result.getHReturn()),
                         storageCost, this));
             } else {
-                track.saveCode(newAddress, EMPTY_BYTE_ARRAY);
+                result.spendGas(storageCost);
+                track.saveCode(newAddress, code);
             }
-        } else if (getLength(code) > blockchainConfig.getConstants().getMAX_CONTRACT_SZIE()) {
-            result.setException(Program.Exception.notEnoughSpendingGas("Contract size too large: " + getLength(result.getHReturn()),
-                    storageCost, this));
-        } else if (!result.isRevert()){
-            result.spendGas(storageCost);
-            track.saveCode(newAddress, code);
         }
 
         getResult().merge(result);

@@ -25,6 +25,7 @@ import org.ethereum.config.blockchain.DaoHFConfig;
 import org.ethereum.config.blockchain.DaoNoHFConfig;
 import org.ethereum.config.blockchain.FrontierConfig;
 import org.ethereum.config.blockchain.HomesteadConfig;
+import org.ethereum.config.blockchain.PetersburgConfig;
 import org.ethereum.core.*;
 import org.ethereum.core.genesis.GenesisLoader;
 import org.ethereum.crypto.ECKey;
@@ -364,8 +365,8 @@ public class StandaloneBlockchain implements LocalBlockchain {
 
     @Override
 	public SolidityContract submitNewContract(ContractMetadata contractMetaData, Object... constructorArgs) {
-		SolidityContractImpl contract = new SolidityContractImpl(contractMetaData);
-		return submitNewContract(contract, constructorArgs);
+		SolidityContractImpl contract = createContract(contractMetaData);
+        return submitNewContract(contract, constructorArgs);
 	}
 
 	private SolidityContract submitNewContract(SolidityContractImpl contract, Object... constructorArgs) {
@@ -406,7 +407,7 @@ public class StandaloneBlockchain implements LocalBlockchain {
 	 */
 	private SolidityContractImpl createContract(String contractName, CompilationResult result) {
 		ContractMetadata cMetaData = result.getContract(contractName);
-		SolidityContractImpl contract = createContract(cMetaData);
+		SolidityContractImpl contract = new SolidityContractImpl(cMetaData);
 
 		for (CompilationResult.ContractMetadata metadata : result.getContracts()) {
 		    contract.addRelatedContract(metadata.abi);
@@ -416,6 +417,7 @@ public class StandaloneBlockchain implements LocalBlockchain {
 
 	private SolidityContractImpl createContract(ContractMetadata contractData) {
 		SolidityContractImpl contract = new SolidityContractImpl(contractData);
+        contract.addRelatedContract(contractData.abi);
 		return contract;
 	}
 
@@ -580,11 +582,11 @@ public class StandaloneBlockchain implements LocalBlockchain {
         }
 
         @Override
-        public SolidityCallResult callFunction(long value, String functionName, Object... args) {
+        public SolidityCallResult callFunction(BigInteger value, String functionName, Object... args) {
             CallTransaction.Function function = contract.getByName(functionName);
             byte[] data = function.encode(convertArgs(args));
             SolidityCallResult res = new SolidityCallResultImpl(this, function);
-            submitNewTx(new PendingTx(null, BigInteger.valueOf(value), data, null, this, res));
+            submitNewTx(new PendingTx(null, value, data, null, this, res));
             return res;
         }
 
@@ -681,7 +683,10 @@ public class StandaloneBlockchain implements LocalBlockchain {
             for (LogInfo logInfo : getReceipt().getLogInfoList()) {
                 for (CallTransaction.Contract c : contract.relatedContracts) {
                     CallTransaction.Invocation event = c.parseEvent(logInfo);
-                    if (event != null) ret.add(event);
+                    if (event != null) {
+                        ret.add(event);
+                        break;
+                    }
                 }
             }
             return ret;
@@ -761,8 +766,8 @@ public class StandaloneBlockchain implements LocalBlockchain {
     }
 
     // Override blockchain net config for fast mining
-    public static ByzantiumConfig getEasyMiningConfig() {
-        return new ByzantiumConfig(new DaoNoHFConfig(new HomesteadConfig(new HomesteadConfig.HomesteadConstants() {
+    public static PetersburgConfig getEasyMiningConfig() {
+        return new PetersburgConfig(new DaoNoHFConfig(new HomesteadConfig(new HomesteadConfig.HomesteadConstants() {
             @Override
             public BigInteger getMINIMUM_DIFFICULTY() {
                 return BigInteger.ONE;
